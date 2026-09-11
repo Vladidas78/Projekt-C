@@ -2165,7 +2165,8 @@ function viewSettings(){
     '<div class="setting-row"><div class="sr-main"><div class="sr-t">Zwei Geräte zusammenführen</div><div class="sr-d">Am anderen Gerät „Exportieren“, die JSON-Datei hierher bringen, dann „Importieren“ → <b>Zusammenführen</b>. Bestehende Aufgaben bleiben erhalten, doppelte werden erkannt.</div></div></div>'+
     '<div style="display:flex;gap:9px;flex-wrap:wrap;margin:6px 0 4px">'+
       '<button class="btn" id="btnExport">'+icon('download')+'Exportieren (JSON)</button>'+
-      '<button class="btn" id="btnImport">'+icon('upload')+'Importieren</button>'+
+      '<button class="btn" id="btnImport">'+icon('upload')+'Importieren (Datei)</button>'+
+      '<button class="btn" id="btnImportText">'+icon('note')+'Backup-Text einf\u00fcgen</button>'+
       '<button class="btn" id="btnSample">'+icon('play')+'Beispieldaten laden</button>'+
     '</div>'+
     '<div class="setting-row" style="border:none"><div class="sr-main"><div class="sr-t" style="color:var(--overdue)">Gefahrenzone</div><div class="sr-d">Beispieldaten oder alle Daten unwiderruflich entfernen.</div></div></div>'+
@@ -2208,6 +2209,7 @@ function bindSettings(){
   if(bl)bl.onclick=()=>confirmDialog('Abmelden?','Du landest wieder auf der Anmeldung. Alle Aufgaben bleiben gespeichert.',logout,false);
   $('#btnExport').onclick=exportData;
   $('#btnImport').onclick=importData;
+  $('#btnImportText').onclick=importTextDialog;
   $('#btnSample').onclick=()=>{seedData();render();toast('Beispieldaten geladen');};
   $('#btnClearSample').onclick=()=>confirmDialog('Beispieldaten löschen?','Alle Aufgaben mit „-Beispiel-“ im Titel werden entfernt.',()=>{
     state.tasks=state.tasks.filter(t=>!/-Beispiel-/.test(t.title));state.trash=state.trash.filter(t=>!/-Beispiel-/.test(t.title));save();render();toast('Beispieldaten gelöscht');});
@@ -2330,6 +2332,42 @@ function mergeImport(data){
   save();
   return rep;
 }
+/* Zweiter Weg herein: Backup-Text einfuegen. Die Dateiauswahl funktioniert in
+   der Sandbox zwar, haengt aber davon ab, was der Host erlaubt - und vom Handy
+   aus hat man selten eine Datei zur Hand. Einfuegen geht immer. */
+function importTextDialog(){
+  const m=openModalHTML('Backup-Text einf\u00fcgen',
+    '<p style="color:var(--muted);line-height:1.7">\u00d6ffne dein bisheriges Kanban, klicke dort <b style="color:var(--ink)">Exportieren (JSON)</b>, \u00f6ffne die gespeicherte Datei in einem Texteditor, markiere alles (Strg\u00a0+\u00a0A) und f\u00fcge es hier ein.</p>'+
+    '<textarea class="textarea" id="imText" spellcheck="false" style="min-height:170px;margin-top:12px;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.45" placeholder=\'{ "areas": [ \u2026 ], "boards": [ \u2026 ], "tasks": [ \u2026 ] }\'></textarea>'+
+    '<div id="imTextErr" style="display:none;margin-top:9px;padding:9px 11px;border-radius:8px;background:var(--overdue-bg);color:var(--overdue);font-size:12.5px;line-height:1.5"></div>',
+    '<div class="spacer"></div><button class="btn" id="imTextCancel">Abbrechen</button><button class="btn btn-primary" id="imTextGo">'+icon('merge')+'Einlesen</button>');
+  const ta=$('#imText',m),err=$('#imTextErr',m);
+  setTimeout(()=>ta.focus(),60);
+  const fail=(msg)=>{err.textContent=msg;err.style.display='block';};
+  $('#imTextCancel',m).onclick=closeModal;
+  $('#imTextGo',m).onclick=()=>{
+    const raw=ta.value.trim();
+    if(!raw)return fail('Da ist noch nichts eingef\u00fcgt.');
+    let data=null;
+    try{data=JSON.parse(raw);}
+    catch(e){return fail('Das ist kein g\u00fcltiges JSON. Achte darauf, den <b>gesamten</b> Dateiinhalt zu kopieren \u2013 von der ersten geschweiften Klammer bis zur letzten.'.replace(/<[^>]+>/g,''));}
+    if(!data||!Array.isArray(data.tasks)||!Array.isArray(data.boards))
+      return fail('Das sieht nicht nach einem Kanban-Backup aus \u2013 es fehlen die Felder \u201etasks\u201c und \u201eboards\u201c.');
+    closeModal();
+    setTimeout(()=>importChoiceDialog(data,'Eingef\u00fcgter Text'),200);
+  };
+}
+/* Beide Wege zur Auswahl stellen. */
+function importChooser(){
+  const m=openModalHTML('Aufgaben \u00fcbernehmen',
+    '<p style="color:var(--muted);line-height:1.7">Hol deine Aufgaben aus dem bisherigen Kanban her\u00fcber. Dort <b style="color:var(--ink)">Einstellungen \u2192 Exportieren (JSON)</b> klicken \u2013 danach hier weiter.</p>',
+    '<div class="spacer"></div><button class="btn" id="icCancel">Abbrechen</button>'+
+    '<button class="btn" id="icText">'+icon('note')+'Text einf\u00fcgen</button>'+
+    '<button class="btn btn-primary" id="icFile">'+icon('upload')+'Datei w\u00e4hlen</button>');
+  $('#icCancel',m).onclick=closeModal;
+  $('#icFile',m).onclick=()=>{closeModal();setTimeout(importData,150);};
+  $('#icText',m).onclick=()=>{closeModal();setTimeout(importTextDialog,150);};
+}
 function importChoiceDialog(data,fileName){
   const n=Array.isArray(data.tasks)?data.tasks.length:0;
   const m=openModalHTML('Backup einlesen',
@@ -2383,10 +2421,11 @@ function showShortcuts(){
 function firstRunDialog(){
   const m=openModalHTML('Willkommen 👋',
     '<p style="color:var(--muted);line-height:1.7;margin-bottom:6px">Dein persönlicher Kanban-Planer für <b>Arbeit</b> und <b>Privat</b>. '+(isArtifact()?'Deine Aufgaben liegen bei deinem Claude-Konto – jedes Geraet, das diese Seite oeffnet, sieht denselben Stand.':'Alle Daten bleiben lokal in diesem Browser.')+'</p>'+
-    '<p style="color:var(--muted);line-height:1.7">Möchtest du mit ein paar Beispielaufgaben starten, um alles auszuprobieren? Du kannst sie später jederzeit löschen.</p>'+
+    '<p style="color:var(--muted);line-height:1.7">Hast du schon ein Kanban mit Aufgaben? Dann w\u00e4hle <b style="color:var(--ink)">Aufgaben \u00fcbernehmen</b> \u2013 exportiere dort das Backup und lies es hier ein. Sonst starte leer oder mit Beispielaufgaben zum Ausprobieren.</p>'+
     (persistent?'':'<div style="margin-top:14px;padding:10px 12px;background:var(--due-soon-bg);border-radius:9px;font-size:12.5px;color:#8A5A16;line-height:1.55">Hinweis: In dieser Vorschau werden Daten nicht dauerhaft gespeichert. Lade die Datei herunter und hoste bzw. öffne sie selbst, damit alles erhalten bleibt.</div>'),
-    '<div class="spacer"></div><button class="btn" id="frEmpty">Leer starten</button><button class="btn btn-primary" id="frSample">'+icon('play')+'Mit Beispieldaten</button>',true);
+    '<button class="btn" id="frImport">'+icon('merge')+'Aufgaben \u00fcbernehmen</button><div class="spacer"></div><button class="btn" id="frEmpty">Leer starten</button><button class="btn btn-primary" id="frSample">'+icon('play')+'Mit Beispieldaten</button>',true);
   const finish=(withSample)=>{state.settings.firstRun=false;if(withSample)seedData();save();closeModal();render();};
+  $('#frImport',m).onclick=()=>{state.settings.firstRun=false;save();closeModal();render();setTimeout(importChooser,200);};
   $('#frSample',m).onclick=()=>finish(true);
   $('#frEmpty',m).onclick=()=>finish(false);
   $('#mClose',m).onclick=()=>finish(false);

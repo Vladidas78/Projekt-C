@@ -1,4 +1,4 @@
-# Handover – Kanban-App (Stand: Version 1.3)
+# Handover – Kanban-App (Stand: Version 1.4)
 
 Fortschreibung von `handover-v1.2.md`. Alles dort Beschriebene gilt weiter,
 sofern hier nichts anderes steht.
@@ -80,23 +80,47 @@ unverändert der Download-Link.
   mitbringt). Prüft dabei gegen, dass keine Script-Blöcke verloren gehen.
 - `test/run-all.sh` – beide Teststufen aus v1.2, ausgebaut.
 
-## Tests (95, alle grün)
+## Tests (111, alle grün)
 | Datei | Umfang | Prüft |
 |---|---|---|
 | `test/outlook.test.js` | 41 | Zeiträume, Dauer-Vorrang, URL-Kodierung, Altdaten |
 | `test/sync.test.js` | 16 | Zwei „Geräte" an einer nachgebauten Datenbank: Übernahme, Konflikt, Pingpong, Schreibfehler |
 | `test/browser.test.js` | 28 | Echter Chromium: Klicks, Drag&Drop, Sandbox-Frame, stille JS-Fehler |
 | `test/mobile.test.js` | 10 | 390 px Breite, Touch, Trefferflächen |
+| `test/import.test.js` | 16 | Backup einlesen Ende zu Ende, Fehlerfälle, keine Doppelten |
 
 `test/harness.js` lädt die Script-Blöcke in einen `vm`-Kontext. Die Brücke
 `__T` reicht die `let`-Variablen heraus (`state`, `ui`, `syncTxt`, `cloudDoc`,
 `cloudRev`) – ohne sie sind sie von außen unsichtbar.
 
+## v1.4 – Bestehende Aufgaben übernehmen
+
+Die veröffentlichte Website startet leer: `kanban.html` enthält nur den Code,
+die Aufgaben liegen im `localStorage` des jeweiligen Browsers. Der Weg herüber
+führt also über Export und Import – und der musste sichtbar und sicher sein.
+
+- **Erststart-Dialog** bietet jetzt als dritte Möglichkeit *Aufgaben übernehmen*
+  (`#frImport` → `importChooser()`), nicht mehr nur „leer" oder „Beispieldaten".
+- **`importChooser()`** stellt beide Wege zur Wahl: Datei oder eingefügter Text.
+- **`importTextDialog()`** liest ein Backup aus eingefügtem JSON. Dieser Weg
+  funktioniert überall – auch dort, wo ein Dateiauswahl-Dialog nicht aufgeht,
+  und vom Handy aus, wo selten eine Datei zur Hand ist. Fehlermeldungen benennen
+  die Ursache (leer / kein JSON / falsche Struktur).
+- Zweiter Knopf in den Einstellungen: *Backup-Text einfügen* (`#btnImportText`).
+
+**Geprüft:** Ein `<input type="file">` geht in einem `<iframe sandbox>` in allen
+getesteten Flag-Kombinationen auf – der Dateiweg funktioniert also. Der
+Textweg ist die Rückfallebene, falls der echte Host enger ist.
+
+**Portal:** `Vladis Portal` hat einen Navigationspunkt *Aufgaben* bekommen, der
+auf das Board zeigt (Artifact `4b0e03f3-880a-49dd-9ccf-c44eebe476f1`). Als
+einziger Eintrag, der die Seite verlässt, mit Pfeilsymbol markiert. Der Stand,
+auf dem diese Änderung aufsetzt, liegt als `docs/portal-stand.html` bei – beim
+Zurückschreiben eines gelesenen Artifacts muss das Plattform-Gerüst
+(`<!doctype>/<html>/<head>/<body>`) abgestreift werden, sonst steckt es doppelt.
+
 ## Offene Punkte
 1. **Outlook-Deeplink im Echtbetrieb bestätigen** – Variante (geschäftlich/privat)
    und Uhrzeit. Einstellung: *Einstellungen › Termine & Outlook*.
-2. **Import im Artifact** – `importData()` öffnet einen Dateiauswahl-Dialog.
-   Ob der in der Sandbox aufgeht, ist ungeprüft. Im Cloud-Betrieb braucht man
-   ihn seltener, weil die Geräte sich von selbst abgleichen.
-3. Aus v1.2 offen geblieben: Checklisten einklappbar, WIP-Limit pro Spalte,
+2. Aus v1.2 offen geblieben: Checklisten einklappbar, WIP-Limit pro Spalte,
    Dunkelmodus.
