@@ -2214,11 +2214,36 @@ function bindSettings(){
   $('#btnReset').onclick=()=>confirmDialog('Wirklich alles zurücksetzen?','Alle Bereiche, Boards, Aufgaben und Einstellungen werden gelöscht. Exportiere vorher ein Backup.',()=>{
     state=defaultState();state.settings.firstRun=false;save();ui.view='dashboard';ui.boardId=null;render();toast('Zurückgesetzt');});
 }
-function exportData(){
-  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
-  const url=URL.createObjectURL(blob);const a=document.createElement('a');
-  a.href=url;a.download='kanban-backup-'+todayISO()+'.json';a.click();
-  setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Backup exportiert');
+/* Als Einzeldatei reicht ein Download-Link. Als Artifact nicht: Die Sandbox
+   laesst von der Seite ausgeloeste Downloads wirkungslos verpuffen - auch mit
+   blob:- oder data:-Adresse. Dort geht der Weg ueber die downloads-Faehigkeit,
+   bei der der Nutzer den Speichervorgang bestaetigt. */
+async function exportData(){
+  const json=JSON.stringify(state,null,2);
+  const name='kanban-backup-'+todayISO()+'.json';
+  if(isArtifact()){
+    let dl=null;
+    try{dl=await window.claude.use('downloads');}catch(e){dl=null;}
+    if(dl){
+      try{
+        await dl.save({filename:name,data:json});
+        toast('Backup gespeichert');
+      }catch(e){
+        const c=(e&&e.code)||'';
+        if(c==='declined')toast('Backup abgebrochen');
+        else{copyText(json,'Speichern ging nicht \u2013 Backup in die Zwischenablage kopiert');}
+      }
+      return;
+    }
+    copyText(json,'Backup in die Zwischenablage kopiert');
+    return;
+  }
+  try{
+    const blob=new Blob([json],{type:'application/json'});
+    const url=URL.createObjectURL(blob);const a=document.createElement('a');
+    a.href=url;a.download=name;a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Backup exportiert');
+  }catch(e){copyText(json,'Backup in die Zwischenablage kopiert');}
 }
 function importData(){
   const inp=document.createElement('input');inp.type='file';inp.accept='application/json,.json';
@@ -2357,7 +2382,7 @@ function showShortcuts(){
 /* ---------- Erststart-Onboarding ---------- */
 function firstRunDialog(){
   const m=openModalHTML('Willkommen 👋',
-    '<p style="color:var(--muted);line-height:1.7;margin-bottom:6px">Dein persönlicher Kanban-Planer für <b>Arbeit</b> und <b>Privat</b>. Alle Daten bleiben lokal in diesem Browser.</p>'+
+    '<p style="color:var(--muted);line-height:1.7;margin-bottom:6px">Dein persönlicher Kanban-Planer für <b>Arbeit</b> und <b>Privat</b>. '+(isArtifact()?'Deine Aufgaben liegen bei deinem Claude-Konto – jedes Geraet, das diese Seite oeffnet, sieht denselben Stand.':'Alle Daten bleiben lokal in diesem Browser.')+'</p>'+
     '<p style="color:var(--muted);line-height:1.7">Möchtest du mit ein paar Beispielaufgaben starten, um alles auszuprobieren? Du kannst sie später jederzeit löschen.</p>'+
     (persistent?'':'<div style="margin-top:14px;padding:10px 12px;background:var(--due-soon-bg);border-radius:9px;font-size:12.5px;color:#8A5A16;line-height:1.55">Hinweis: In dieser Vorschau werden Daten nicht dauerhaft gespeichert. Lade die Datei herunter und hoste bzw. öffne sie selbst, damit alles erhalten bleibt.</div>'),
     '<div class="spacer"></div><button class="btn" id="frEmpty">Leer starten</button><button class="btn btn-primary" id="frSample">'+icon('play')+'Mit Beispieldaten</button>',true);
