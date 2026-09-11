@@ -15,18 +15,20 @@ function memStore(){
   return {getItem:k=>(k in m?m[k]:null),setItem:(k,v)=>{m[k]=String(v);},removeItem:k=>{delete m[k];},clear(){for(const k in m)delete m[k];}};
 }
 
-function load(file){
-  const html=fs.readFileSync(file||path.join(__dirname,'..','kanban.html'),'utf8');
+function load(opts){
+  opts=opts||{};
+  const html=fs.readFileSync(opts.file||path.join(__dirname,'..','kanban.html'),'utf8');
   const blocks=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]);
   let code=blocks.join('\n;\n');
   // init() am Ende abschneiden - wir wollen keine App starten
   code=code.replace(/\ninit\(\);\s*$/,'\n');
   if(/\binit\(\);/.test(code.split('\n').slice(-6).join('\n'))) throw new Error('init() nicht abgeschnitten');
   // Bruecke zu den let/const-Variablen
-  code+=';globalThis.__T={getState:()=>state,setState:v=>{state=v},getUi:()=>ui};';
+  code+=';globalThis.__T={getState:()=>state,setState:v=>{state=v},getUi:()=>ui,'
+     +'syncTxt:()=>syncTxt,syncCls:()=>syncCls,cloudDoc:()=>cloudDoc,cloudRev:()=>cloudRev};';
 
   const doc={createElement:()=>noopEl(),body:noopEl(),head:noopEl(),
-    querySelector:()=>null,querySelectorAll:()=>[],addEventListener(){},
+    querySelector:()=>null,querySelectorAll:()=>[],getElementById:()=>null,addEventListener(){},
     documentElement:noopEl(),execCommand(){return true;}};
   const sandbox={console,document:doc,localStorage:memStore(),sessionStorage:memStore(),
     navigator:{userAgent:'node',clipboard:null},location:{href:'file:///kanban.html',reload(){}},
@@ -36,6 +38,7 @@ function load(file){
   sandbox.globalThis=sandbox;
   sandbox.window.addEventListener=()=>{};
   sandbox.window.matchMedia=()=>({matches:false,addEventListener(){}});
+  if(opts.claude)sandbox.claude=sandbox.window.claude=opts.claude;
   vm.createContext(sandbox);
   vm.runInContext(code,sandbox,{filename:'kanban.html'});
   return sandbox;
