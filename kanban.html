@@ -487,6 +487,8 @@ const IC = {
   eyeoff:'<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>',
   columns:'<rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/>',
   play:'<polygon points="5 3 19 12 5 21 5 3"/>',
+  cloud:'<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
+  cloudoff:'<path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3"/><line x1="1" y1="1" x2="23" y2="23"/>',
 };
 function icon(n,cls){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"'+(cls?' class="'+cls+'"':'')+'>'+(IC[n]||'')+'</svg>';}
 
@@ -578,6 +580,7 @@ function defaultState(){
       defaultAreaId:'a_work', defaultBoardId:'b_work', defaultPriority:'normal',
       dueSoonDays:3, dailySummary:true, dailySummaryTime:'08:00',
       completedBehavior:'show', autoArchiveDays:14, notificationsEnabled:false,
+      outlookHost:'office', calDefaultMin:30,
       firstRun:true
     },
     meta:{version:1}
@@ -602,6 +605,7 @@ function makeTask(o){
     createdAt:now,startDate:'',dueDate:'',dueTime:'',category:'',tags:[],
     subtasks:[],notes:'',links:[],attachments:[],
     recurrence:{type:'none'},reminder:{type:'none'},estimate:null,
+    cal:{dur:null,loc:''},
     completedAt:null,archived:false,
     history:[{t:now,type:'created'}]
   },o);
@@ -925,6 +929,7 @@ function renderCard(t,opts){
   if(t.links&&t.links.length)mini.push('<span title="Links">'+icon('link')+t.links.length+'</span>');
   if(t.reminder&&t.reminder.type!=='none')mini.push('<span title="Erinnerung">'+icon('bell')+'</span>');
   if(t.estimate)mini.push('<span title="Aufwand">'+icon('clock')+t.estimate+'m</span>');
+  const calBtn=cardCalBtn(t);
   return '<div class="card'+(done?' completed':'')+'" data-id="'+t.id+'" data-col="'+t.columnId+'">'+
     '<div class="card-pbar" style="background:'+P.color+'"></div>'+
     '<div class="card-top">'+
@@ -934,7 +939,7 @@ function renderCard(t,opts){
     '</div>'+
     ((tagsHtml||showPrio||duePill)?'<div class="card-meta">'+(showPrio?priorityFlag(t.priority):'')+duePill+tagsHtml+'</div>':'')+
     cardChecklist(t)+
-    (mini.length?'<div class="mini-icons">'+mini.join('')+'</div>':'')+
+    ((mini.length||calBtn)?'<div class="mini-icons">'+mini.join('')+calBtn+'</div>':'')+
   '</div>';
 }
 </script>
@@ -1128,6 +1133,7 @@ function mountBoard(){
 function bindBoard(el,b){
   $$('.card',el).forEach(c=>{
     c.addEventListener('click',e=>{
+      if(e.target.closest('[data-act="cal"]'))return;   // Link oeffnet Outlook, Panel bleibt zu
       if(e.target.closest('[data-act="toggle"]')){const t=state.tasks.find(x=>x.id===c.dataset.id);toggleComplete(t);mountBoard();refreshBadges();return;}
       if(cardClickSub(e,c))return;
       openDetail(c.dataset.id);
@@ -1152,7 +1158,7 @@ function setupDnD(root){
 }
 function onCardDown(e){
   if(e.button!==undefined&&e.button!==0)return;
-  if(e.target.closest('[data-act="toggle"]')||e.target.closest('[data-act="subtoggle"]')||e.target.closest('[data-act="opentask"]'))return;
+  if(e.target.closest('[data-act="toggle"]')||e.target.closest('[data-act="subtoggle"]')||e.target.closest('[data-act="opentask"]')||e.target.closest('[data-act="cal"]'))return;
   const card=e.currentTarget;
   const startX=e.clientX,startY=e.clientY;
   const id=card.dataset.id;
@@ -1652,6 +1658,172 @@ function openTaskModal(prefill){
   title.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){doSave();}else if(e.key==='Enter'){e.preventDefault();doSave();}});
 }
 </script>
+<style>
+/* ---------- Termin / Outlook ---------- */
+.cal-mini{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;line-height:1;
+  padding:3px 7px;border-radius:6px;border:1px solid var(--line);background:var(--surface-2);
+  color:var(--muted);text-decoration:none;white-space:nowrap;cursor:pointer}
+.cal-mini svg{width:12px;height:12px}
+.cal-mini:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft,var(--surface-2))}
+.cal-box{border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:var(--surface-2)}
+.cal-when{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:2px}
+.cal-note{font-size:12px;color:var(--muted);line-height:1.5}
+.cal-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+a.btn{text-decoration:none}
+</style>
+<script>
+/* ================= Termin in Outlook ====================================
+   Oeffnet ein vorausgefuelltes Outlook-Terminfenster. Gespeichert wird der
+   Termin erst, wenn der Nutzer in Outlook selbst auf Speichern drueckt.
+
+   Bewusst KEINE .ics-Datei: Als Artifact laeuft die Seite in einer Sandbox,
+   die von der Seite ausgeloeste Downloads unterdrueckt; .ics steht ausserdem
+   nicht auf der erlaubten Dateiendungs-Liste. Der Deeplink ist eine normale
+   Verlinkung und kommt deshalb durch.
+
+   Kein Extra-Schalter pro Aufgabe: Der Knopf erscheint genau dann, wenn ein
+   Zieltermin gesetzt ist. Ohne Datum gibt es nichts in den Kalender zu legen.
+   ====================================================================== */
+
+function calDuration(t){
+  const c=t.cal||{};
+  return (+c.dur>0?+c.dur:0) || (+t.estimate>0?+t.estimate:0) || (+(state.settings.calDefaultMin)>0?+state.settings.calDefaultMin:30);
+}
+function calIsAllDay(t){return !t.dueTime;}
+function p2(n){return String(n).padStart(2,'0');}
+function calLocalStamp(d){
+  return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+'T'+p2(d.getHours())+':'+p2(d.getMinutes())+':00';
+}
+/* Start/Ende als LOKALE Zeitangabe ohne Z-Suffix - Outlook legt den Termin
+   dann in der Zeitzone des Nutzers an. Mit Z-Suffix waere er um den
+   UTC-Versatz verschoben (im Sommer zwei Stunden). */
+function calRange(t){
+  if(!t.dueDate)return null;
+  if(calIsAllDay(t)){
+    return {start:t.dueDate+'T00:00:00',end:addDays(t.dueDate,1)+'T00:00:00',allday:true};
+  }
+  const parts=String(t.dueTime).split(':');
+  const d=parseDate(t.dueDate);if(!d)return null;
+  d.setHours(+parts[0]||0,+parts[1]||0,0,0);
+  const e=new Date(d.getTime()+calDuration(t)*60000);
+  return {start:calLocalStamp(d),end:calLocalStamp(e),allday:false};
+}
+function calWhenText(t){
+  const r=calRange(t);if(!r)return '';
+  if(r.allday)return fmtDate(t.dueDate)+' · ganztaegig';
+  const e=new Date(parseDate(t.dueDate).getTime());
+  const parts=String(t.dueTime).split(':');
+  e.setHours(+parts[0]||0,+parts[1]||0,0,0);
+  const end=new Date(e.getTime()+calDuration(t)*60000);
+  return fmtDate(t.dueDate)+' · '+t.dueTime+'–'+p2(end.getHours())+':'+p2(end.getMinutes())+' ('+calDuration(t)+' Min.)';
+}
+/* Termintext: Beschreibung, Unteraufgaben, Notizen, Links, Herkunft */
+function calBody(t){
+  const L=[];
+  if(t.description)L.push(t.description);
+  if(t.subtasks&&t.subtasks.length){
+    L.push('');L.push('Unteraufgaben:');
+    t.subtasks.forEach(x=>L.push((x.done?'[x] ':'[ ] ')+x.text));
+  }
+  if(t.notes){L.push('');L.push('Notizen:');L.push(t.notes);}
+  if(t.links&&t.links.length){L.push('');L.push('Links:');t.links.forEach(l=>L.push(l));}
+  const meta=[];
+  const a=areaById(t.areaId),b=boardById(t.boardId);
+  if(a)meta.push(a.name);
+  if(b&&(!a||b.name!==a.name))meta.push(b.name);
+  if(t.category)meta.push(t.category);
+  if(t.priority&&t.priority!=='normal')meta.push('Prioritaet: '+PRIOS[t.priority].label);
+  if(t.tags&&t.tags.length)meta.push(t.tags.join(', '));
+  if(meta.length){L.push('');L.push('— '+meta.join(' · ')+' (aus dem Kanban-Board)');}
+  return L.join('\n');
+}
+function outlookBase(){
+  return (state.settings.outlookHost==='live')
+    ? 'https://outlook.live.com/calendar/0/deeplink/compose'
+    : 'https://outlook.office.com/calendar/0/deeplink/compose';
+}
+function outlookUrl(t){
+  const r=calRange(t);if(!r)return null;
+  const e=encodeURIComponent;
+  const q=['path='+e('/calendar/action/compose'),'rru=addevent',
+           'subject='+e(t.title||'Aufgabe'),
+           'startdt='+e(r.start),'enddt='+e(r.end)];
+  if(r.allday)q.push('allday=true');
+  const loc=(t.cal&&t.cal.loc)||'';
+  if(loc)q.push('location='+e(loc));
+  const body=calBody(t);
+  if(body)q.push('body='+e(body));
+  return outlookBase()+'?'+q.join('&');
+}
+/* Notnagel, falls der Deeplink im jeweiligen Outlook nicht greift */
+function calPlainText(t){
+  const L=['Betreff: '+(t.title||'Aufgabe'),'Zeit: '+calWhenText(t)];
+  const loc=(t.cal&&t.cal.loc)||'';
+  if(loc)L.push('Ort: '+loc);
+  const body=calBody(t);
+  if(body){L.push('');L.push(body);}
+  return L.join('\n');
+}
+function copyText(txt,okMsg){
+  const done=()=>toast(okMsg||'Kopiert');
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done,()=>fallback());
+  }else fallback();
+  function fallback(){
+    try{
+      const ta=document.createElement('textarea');
+      ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';
+      document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();done();
+    }catch(e){toast('Kopieren nicht moeglich');}
+  }
+}
+/* Kleiner Knopf auf der Karte - nur bei offenen Aufgaben mit Zieltermin. */
+function cardCalBtn(t){
+  if(!t.dueDate||taskCompleted(t))return '';
+  const url=outlookUrl(t);if(!url)return '';
+  return '<a class="cal-mini" data-act="cal" href="'+esc(url)+'" target="_blank" rel="noopener" '+
+         'title="Termin in Outlook oeffnen – '+esc(calWhenText(t))+'">'+icon('calendar')+'Outlook</a>';
+}
+/* Abschnitt im Detailpanel */
+function calSection(t){
+  if(!t.dueDate){
+    return '<div class="section-title">'+icon('calendar')+'Termin</div>'+
+      '<div class="cal-box"><div class="cal-note">Setze oben einen <b>Zieltermin</b> – dann kannst du die Aufgabe von hier aus als Outlook-Termin oeffnen. '+
+      'Ohne Uhrzeit wird daraus ein ganztaegiger Termin.</div></div>';
+  }
+  const url=outlookUrl(t);
+  const c=t.cal||{dur:null,loc:''};
+  return '<div class="section-title">'+icon('calendar')+'Termin</div>'+
+    '<div class="cal-box">'+
+      '<div class="cal-when">'+esc(calWhenText(t))+'</div>'+
+      '<div class="cal-note">'+(calIsAllDay(t)
+          ? 'Ohne Uhrzeit → ganztaegiger Termin. Trage oben eine Uhrzeit ein, wenn du eine feste Zeit willst.'
+          : 'Outlook oeffnet ein vorausgefuelltes Terminfenster. Gespeichert wird erst, wenn du dort auf Speichern drueckst.')+'</div>'+
+      '<div class="row" style="margin-top:9px">'+
+        '<div class="field" style="max-width:150px"><label>Dauer (Minuten)</label>'+
+          '<input class="input" type="number" min="5" step="5" id="dCalDur" value="'+(c.dur!=null?c.dur:'')+'" placeholder="'+calDuration(t)+'"'+(calIsAllDay(t)?' disabled':'')+'></div>'+
+        '<div class="field"><label>Ort (optional)</label>'+
+          '<input class="input" id="dCalLoc" value="'+esc(c.loc||'')+'" placeholder="Raum, Teams-Link, Adresse…"></div>'+
+      '</div>'+
+      '<div class="cal-actions">'+
+        '<a class="btn btn-primary" id="dCalOpen" href="'+esc(url)+'" target="_blank" rel="noopener">'+icon('calendar')+'In Outlook oeffnen</a>'+
+        '<button class="btn" id="dCalCopy">'+icon('copy')+'Termintext kopieren</button>'+
+      '</div>'+
+    '</div>';
+}
+function bindCalSection(t,p,onChange){
+  const dur=$('#dCalDur',p);
+  if(dur)dur.addEventListener('input',()=>{
+    const v=+dur.value;
+    t.cal.dur=(v>0)?v:null;
+    save();onChange&&onChange();
+  });
+  const loc=$('#dCalLoc',p);
+  if(loc)loc.addEventListener('input',()=>{t.cal.loc=loc.value;save();onChange&&onChange();});
+  const cp=$('#dCalCopy',p);
+  if(cp)cp.onclick=()=>copyText(calPlainText(t),'Termintext kopiert');
+}
+</script>
 <script>
 /* ---------- Detailansicht (Seitenpanel) ---------- */
 function isDetailOpen(){const p=$('#detailPanel');return p&&p.classList.contains('show');}
@@ -1680,6 +1852,8 @@ function renderDetail(t){
       '<textarea class="title-input" id="dTitle" rows="1" style="width:100%;resize:none;overflow:hidden;margin-bottom:14px" placeholder="Titel…">'+esc(t.title)+'</textarea>'+
       '<div class="field"><label>Beschreibung</label><textarea class="textarea" data-f="description" placeholder="Beschreibung…">'+esc(t.description)+'</textarea></div>'+
       '<div id="dFields">'+taskFormFields(t)+'</div>'+
+      // Termin (Outlook)
+      '<div id="dCal">'+calSection(t)+'</div>'+
       // Unteraufgaben
       '<div class="section-title">'+icon('checklist')+'Unteraufgaben'+(prog?' · '+prog.done+'/'+prog.total:'')+'</div>'+
       '<div class="subtasks" id="dSubs">'+t.subtasks.map(s=>subtaskRow(s)).join('')+
@@ -1710,14 +1884,19 @@ function bindDetail(t){
   $('#dClose',p).onclick=closeDetail;
   // Titel (auto-grow + speichern)
   const ta=$('#dTitle',p);const grow=()=>{ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';};grow();
-  ta.addEventListener('input',()=>{grow();t.title=ta.value;persist();});
+  ta.addEventListener('input',()=>{grow();t.title=ta.value;persist();refreshCalLink();});
   ta.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();ta.blur();}});
   // Beschreibung / Notizen
-  $$('[data-f="description"],[data-f="notes"]',p).forEach(el=>el.addEventListener('input',()=>{t[el.dataset.f]=el.value;persist();}));
+  $$('[data-f="description"],[data-f="notes"]',p).forEach(el=>el.addEventListener('input',()=>{t[el.dataset.f]=el.value;persist();refreshCalLink();}));
+  // nur den Link neu setzen, damit der Cursor im Textfeld nicht springt
+  function refreshCalLink(){const a=$('#dCalOpen',p);if(a){const u=outlookUrl(t);if(u)a.href=u;}}
   // Formularfelder
+  const redrawCal=()=>{const h=$('#dCal',p);if(h){h.innerHTML=calSection(t);bindCalSection(t,p,()=>redrawCal());}};
   readFormInto($('#dFields',p),t,(field)=>{save();
-    if(field==='boardId'||field==='priority'||field==='dueDate'){/* Board-Wechsel kann Historie/Spalte ändern */}
+    // Termin haengt an Datum, Uhrzeit, Aufwand, Titel und Board - neu zeichnen
+    if(!field||['dueDate','dueTime','estimate','boardId','priority','category'].includes(field))redrawCal();
   });
+  bindCalSection(t,p,()=>redrawCal());
   // Toggle erledigt
   $('#dToggle',p).onclick=()=>{toggleComplete(t);renderDetail(t);};
   // Menü
@@ -1802,6 +1981,11 @@ function viewSettings(){
     row('Erledigte Aufgaben','Verhalten erledigter Aufgaben im Board.',sel('completedBehavior',[{v:'show',label:'Im Board anzeigen'},{v:'hide',label:'Ausblenden'},{v:'archive',label:'Automatisch archivieren'}],s.completedBehavior))+
     row('Automatisch archivieren nach','Nur bei „Automatisch archivieren“.','<input class="input" type="number" min="0" data-set="autoArchiveDays" value="'+s.autoArchiveDays+'" style="max-width:110px"> Tagen')+
 
+    '<div class="section-title">'+icon('calendar')+'Termine & Outlook</div>'+
+    row('Outlook-Variante','Welches Outlook der Termin-Knopf oeffnet. Geschaeftlich = Microsoft 365 (outlook.office.com), Privat = Outlook.com (outlook.live.com). Mit der falschen Variante landest du auf einer Anmeldeseite statt im Termin.',sel('outlookHost',[{v:'office',label:'Geschaeftlich (Microsoft 365)'},{v:'live',label:'Privat (Outlook.com)'}],s.outlookHost))+
+    row('Standarddauer','Laenge des Termins, wenn die Aufgabe weder eine Dauer noch einen geschaetzten Aufwand hat.','<input class="input" type="number" min="5" step="5" data-set="calDefaultMin" value="'+s.calDefaultMin+'" style="max-width:110px"> Minuten')+
+    '<div class="setting-row" style="border:none"><div class="sr-main"><div class="sr-d">Der Knopf erscheint von selbst an jeder offenen Aufgabe mit Zieltermin – auf der Karte und im Detailfenster. Ohne Uhrzeit wird ein ganztaegiger Termin daraus. Outlook oeffnet nur ein vorausgefuelltes Fenster; gespeichert wird erst, wenn du dort auf Speichern drueckst.</div></div></div>'+
+
     '<div class="section-title">'+icon('bell')+'Benachrichtigungen</div>'+
     row('Browser-Benachrichtigungen','Meldungen auch außerhalb des Tabs (sofern der Browser es zulässt).',sw('notificationsEnabled',s.notificationsEnabled))+
     row('Tägliche Zusammenfassung','Einmal täglich ein Überblick über fällige Aufgaben.',sw('dailySummary',s.dailySummary))+
@@ -1833,7 +2017,7 @@ function viewSettings(){
     '</div>'+
     '<div style="margin-top:24px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;font-size:12.5px;color:var(--muted);line-height:1.6">'+
       '<b style="color:var(--ink)">Speicherort:</b> '+(persistent?'Lokal in diesem Browser (localStorage). Daten bleiben nach dem Schließen erhalten.':'⚠ Vorschaumodus – Daten werden <b>nicht</b> dauerhaft gespeichert. Lade die Datei herunter und hoste/öffne sie selbst, damit die Speicherung funktioniert.')+
-      '<br><b style="color:var(--ink)">Version:</b> 1.1 · Einzeldatei, offline-fähig, mit Anmeldung und Zusammenführen.</div>'+
+      '<br><b style="color:var(--ink)">Version:</b> 1.3 · Einzeldatei, offline-faehig, mit Anmeldung, Zusammenfuehren, Outlook-Terminen und Geraete-Sync.</div>'+
     '<div style="height:30px"></div></div>';
 }
 function bindSettings(){
@@ -1897,6 +2081,9 @@ function normalizeTask(t){
   t.history=(Array.isArray(t.history)&&t.history.length)?t.history:[{t:t.createdAt||Date.now(),type:'created'}];
   t.recurrence=t.recurrence||{type:'none'};
   t.reminder=t.reminder||{type:'none'};
+  t.cal=(t.cal&&typeof t.cal==='object')?t.cal:{dur:null,loc:''};
+  if(typeof t.cal.loc!=='string')t.cal.loc='';
+  if(t.cal.dur!=null&&!(+t.cal.dur>0))t.cal.dur=null;
   if(!t.createdAt)t.createdAt=Date.now();
   return t;
 }
@@ -2070,7 +2257,7 @@ function showLogin(onOk){
     '<button class="btn btn-primary" type="button" id="lgGo" onclick="loginTry()">'+icon('lock')+'Anmelden</button>'+
     '<div class="login-note">Einfache Zugangssperre ohne Verschl&uuml;sselung &ndash; h&auml;lt Gelegenheitsblicke fern, ersetzt aber keinen echten Schutz. '+
       'Zugangsdaten &auml;nderbar unter Einstellungen &rsaquo; Zugang.<br>'+
-      '<span id="lgVer">Version 1.2</span> &middot; '+
+      '<span id="lgVer">Version 1.3</span> &middot; '+
       '<a href="#" id="lgSkip" onclick="loginSkip();return false;">Anmeldung &uuml;berspringen</a></div>'+
   '</div>';
   document.body.appendChild(g);
